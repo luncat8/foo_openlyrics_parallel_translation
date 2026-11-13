@@ -1,6 +1,6 @@
 # foo_openlyrics parallel translations
 
-Our goal to add fancy colored highlight similar to prototype: https://github.com/luncat8/translate-parallel-3-side
+Our goal is add fancy colored highlight similar to prototype: https://github.com/luncat8/translate-parallel-3-side
 
 ![build-and-test workflow](https://github.com/jacquesh/foo_openlyrics/actions/workflows/run_tests.yml/badge.svg)
 
@@ -18,7 +18,7 @@ An open-source lyrics plugin for [foobar2000](https://www.foobar2000.org/) that 
 
 ## Screenshots
 Fonts & colours are fully configurable
-![](.github/readme/lyrics_vertical_scroll.gif)
+![](TODO)
 
 The editor window
 ![](.github/readme/editor.jpg)
