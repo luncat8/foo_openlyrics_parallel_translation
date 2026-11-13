@@ -48,6 +48,13 @@ struct MapBlockLayout
     // Vertical extent of the painted rows, without the trailing gap. The active-block
     // background tint uses this so that it does not bleed into the next block.
     int content_height = 0;
+
+    // True when the block produced nothing to paint (every column hidden, for instance).
+    // Callers use this to skip a block instead of drawing its background tint with no text.
+    bool empty() const
+    {
+        return runs.empty();
+    }
 };
 
 // Horizontal alignment, mirroring the panel's own text alignment preference.

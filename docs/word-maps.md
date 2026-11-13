@@ -96,8 +96,9 @@ block starting at line 31 has 1 column line(s) but 3 are required
 
 `make check` runs the reader against the examples published with the format, a set of
 tolerance cases (BOM, CRLF, literal braces, empty cells, hour-long timestamps, an `@offset`
-and out-of-order headers) and nine rejection cases. It needs neither Windows nor
-foobar2000, so CI runs it on every change.
+and out-of-order headers) and nine rejection cases. It also re-parses the example printed
+in this document, so the example cannot rot. None of it needs Windows or foobar2000, so CI
+runs it on every change; see `.github/workflows/check-pull-request-contents.yml`.
 
 ## How it is drawn
 

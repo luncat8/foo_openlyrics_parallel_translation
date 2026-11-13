@@ -49,3 +49,21 @@ jobs:
         run: |
           echo "All user-visible changes must include an appropriate addition to the changelog"
           exit 1
+
+  bundle-reader-checks:
+    # The bundle reader (src/lyric_map.cpp) is deliberately portable: no Windows headers,
+    # no foobar2000 SDK. That makes it cheap to validate on every pull request, and it means
+    # a formatting regression is caught here rather than by someone's lyric panel looking
+    # wrong months later. The same checks build the palette comparison, so a bundle whose
+    # colours drifted from the published palette also fails.
+    name: Check the word-map bundle reader
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run the portable checks
+        run: make check

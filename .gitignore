@@ -13,3 +13,7 @@ Release/
 releases/
 metrics/metrics_data/
 metrics/.venv
+
+# Output of the portable checks (see the Makefile). Never committed: it is rebuilt by
+# `make check` and is specific to the machine that ran it.
+build/portable/

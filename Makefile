@@ -17,7 +17,7 @@ EXAMPLES := $(wildcard docs/examples/*.lmz.txt)
 VALID    := $(EXAMPLES) $(wildcard tests/data/linguamap/valid/*.lmz.txt)
 INVALID  := $(wildcard tests/data/linguamap/invalid/*.lmz.txt)
 
-.PHONY: all check check-examples check-invalid check-palette clean
+.PHONY: all check check-examples check-invalid check-palette check-docs clean
 
 all: check
 
@@ -46,7 +46,12 @@ check-invalid: $(CHECKER)
 	for f in $(INVALID); do $(CHECKER) --reject "$$f" >/dev/null; done; \
 	echo "$$(echo $(INVALID) | wc -w) invalid bundle(s) rejected"
 
-check: check-palette check-examples check-invalid
+# Proves that the bundle examples embedded in the documentation still parse. An example
+# that does not parse is the first thing a new author copies, so it must not rot.
+check-docs: $(CHECKER) tools/check_docs.py
+	@./tools/check_docs.py $(CHECKER) $(wildcard docs/*.md)
+
+check: check-palette check-examples check-invalid check-docs
 
 clean:
 	rm -rf $(BUILD)

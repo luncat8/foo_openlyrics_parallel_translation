@@ -1,0 +1,14 @@
+#!linguamap 1
+@title        Jumpin' Girl
+@source       jp
+@translit     tr
+@columns      jp,tr,ru,en
+@columnTitles ru=Русский,en=English
+@posDefault   part
+@timeFormat   lrc
+
+[00:12.40]
+{夕暮れ:q} {空:n}を {見上げる:v}
+	yūgure sora o miageru
+	В сумерках смотрим вверх на небо —
+	At dusk we look up at the sky
