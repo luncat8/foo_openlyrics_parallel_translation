@@ -32,6 +32,27 @@ The editor window
 ## Why another lyrics plugin?
 At the time that I started this, the most widely-used lyrics plugin was [foo_uie_lyrics3](https://www.foobar2000.org/components/view/foo_uie_lyrics3) which had several built-in sources but those had largely stopped working due to the relevant websites going down or otherwise becoming generally unavailable. The original developer seemed to be nowhere in sight though and the source for the plugin did not appear to be available anywhere online. There is an SDK for building one's own sources for foo_uie_lyrics3 but building plugins for plugins didn't really take my fancy. Other (more up-to-date) plugins did exist but were mostly distributed by people posting binaries for you to download from their Dropbox on Reddit. Running binaries published via Dropbox by random people on Reddit did not seem like the most amazing idea.
 
+## Building on Windows
+
+The plugin is built with MSBuild and the MSVC v143 toolset. From a Windows 10 command prompt:
+
+```bat
+build.bat
+```
+
+`build.bat` is a thin wrapper around `build.ps1`, which is the recommended entry point. Common options:
+
+```bat
+build.bat -Configuration Debug
+build.bat -Platform x64
+build.bat -Platform all -RunTests
+build.bat -Clean -Configuration Release -Platform x64
+```
+
+Each build writes a timestamped log to `build\logs\`, for example `build-Release-x86-20261113-120000.log`. Compiler and linker diagnostics are also collected in the matching `*-errors.txt` file and printed to the console when the build fails. Warnings are collected in `*-warnings.txt`.
+
+The build requires Visual Studio 2022 with the *Desktop development with C++* workload (for MSBuild and the v143 toolset), PowerShell 7 (`pwsh`), CMake 3.31.6 or newer, Git, and the Windows 10 SDK 10.0.19041.0. The first build downloads and compiles libcurl and nghttp2, so allow some extra time.
+
 ## Contributing
 Please do log an issue or send a pull request if you have found a bug, would like a feature added. If you'd like to support the project you can also make a small donation using any of these links:
 

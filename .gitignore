@@ -17,3 +17,7 @@ metrics/.venv
 # Output of the portable checks (see the Makefile). Never committed: it is rebuilt by
 # `make check` and is specific to the machine that ran it.
 build/portable/
+
+# MSBuild intermediate files and build logs produced by build.ps1/build.bat.
+build/intermediate/
+build/logs/
