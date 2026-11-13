@@ -21,6 +21,7 @@
 #include "tag_util.h"
 #include "timer_block.h"
 #include "ui_hooks.h"
+#include "ui_lyrics_map.h"
 #include "ui_lyrics_panel.h"
 #include "ui_util.h"
 #include "win32_util.h"
@@ -890,6 +891,275 @@ void LyricPanel::DrawTimestampedLyrics(HDC dc, CRect client_area)
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Word-map rendering
+// ---------------------------------------------------------------------------------------
+//
+// The plain rendering paths above stay exactly as they are: a track whose lyrics came from an
+// LRC file is drawn by the same code, with the same measurements, as before this feature
+// existed. Only lyrics that carry a `LyricMap` (see src/lyric_map_plugin.h) reach the code
+// below, and only when the user has left maps enabled, which makes the whole feature
+// reversible from the preferences without touching any of the shared scroll logic.
+
+bool LyricPanel::should_draw_map() const
+{
+    if(!preferences::display::map_enabled()) return false;
+    if(!m_lyrics.HasMap()) return false;
+
+    const LyricMap& map = *m_lyrics.map;
+    if(!map.is_valid()) return false;
+    // An untimed map has nothing to scroll or highlight, so the plain path (which already
+    // handles unsynced text and manual scrolling) is strictly better for it.
+    return m_lyrics.IsTimestamped();
+}
+
+void LyricPanel::DrawMappedLyrics(HDC dc, CRect client_area, bool is_timestamped)
+{
+    const LyricMap& map = *m_lyrics.map;
+
+    TEXTMETRIC font_metrics = {};
+    WIN32_OP_D(GetTextMetrics(dc, &font_metrics))
+    const int row_height = font_metrics.tmHeight + preferences::display::linegap();
+
+    // The indent is expressed in pixels by the preference page, but "auto" (0) resolves to
+    // one em so that it tracks the font size the user actually chose.
+    int indent_px = preferences::display::map_indent_px();
+    if(indent_px <= 0)
+    {
+        indent_px = std::max(1, font_metrics.tmHeight);
+    }
+
+    MapBlockStyle style = {};
+    style.dark_mode = is_dark_mode();
+    style.indent_px = indent_px;
+    style.main_text_colour = preferences::display::main_text_colour();
+    style.past_text_colour = preferences::display::past_text_colour();
+    style.highlight_colour = preferences::display::highlight_colour();
+
+    switch(preferences::display::text_alignment())
+    {
+        case TextAlignment::MidCentre:
+        case TextAlignment::TopCentre: style.alignment = MapAlignment::Centre; break;
+
+        case TextAlignment::MidLeft:
+        case TextAlignment::TopLeft: style.alignment = MapAlignment::Left; break;
+
+        case TextAlignment::MidRight:
+        case TextAlignment::TopRight: style.alignment = MapAlignment::Right; break;
+
+        default: LOG_WARN("Unrecognised text alignment option when drawing a map"); break;
+    }
+
+    const double playback_time = get_playback_time().current_time;
+    const double scroll_duration = preferences::display::scroll_time_seconds();
+    const double fade_duration = preferences::display::highlight_fade_seconds();
+
+    // The same scroll position as the plain renderer, so that switching the map on does not
+    // change which line is "current" or when the panel starts moving. The highlight fade is
+    // applied per unit by `layout_block` rather than by lerping whole lines, because a line
+    // that is a quarter faded must not lose the colours that carry its grammar.
+    const LyricScrollPosition scroll = get_scroll_position(m_lyrics, playback_time, scroll_duration);
+    const LyricScrollPosition fade = get_scroll_position(m_lyrics, playback_time, fade_duration);
+
+    // Measure through GDI. The layout helper decides wrapping, so this has to be the same
+    // font that will paint the runs: `dc` already has `preferences::display::font()` selected.
+    const MapMeasureFunction measure = [dc](const std::tstring& text) -> int
+    {
+        if(text.empty()) return 0;
+        SIZE size = {};
+        if(!GetTextExtentPoint32(dc, text.data(), int(text.size()), &size))
+        {
+            LOG_WARN("Failed to measure map text: %d", GetLastError());
+            return int(text.size()) * 8; // A guess beats a zero-width run (which would loop)
+        }
+        return int(size.cx);
+    };
+
+    const MapColourFunction colour_of = [&map, &style](colorization::Pos pos) -> COLORREF
+    {
+        return map.colour_of(pos, style.dark_mode, style.main_text_colour);
+    };
+
+    // Lay the whole thing out first, then paint: the scroll offset needs the total height of
+    // every block before the first pixel can be positioned.
+    struct LaidOutBlock
+    {
+        MapBlockLayout layout;
+        int top = 0;
+        int line_index = 0;
+        bool active = false;
+    };
+
+    std::vector<LaidOutBlock> blocks;
+    blocks.reserve(map.lines.size());
+
+    int total_height = 0;
+    int active_block_top = 0;
+
+    for(size_t i = 0; i < map.lines.size(); i++)
+    {
+        const MapLine& line = map.lines[i];
+
+        // The active block is the one the plain renderer would highlight, and the fade runs
+        // on the same schedule: the active block drifts toward the past colour while the
+        // block after it rises toward the highlight colour. Doing both is what keeps the map
+        // in step with the plain view rather than snapping where the other slides.
+        const bool is_active = is_timestamped && (int(i) == scroll.active_line_index);
+        const bool is_upcoming = is_timestamped && (int(i) == scroll.active_line_index + 1);
+
+        style.past_factor = (is_timestamped && (int(i) < scroll.active_line_index)) ? 1.0 : 0.0;
+        if(is_active) style.past_factor = fade.next_line_scroll_factor;
+        style.upcoming_factor = is_upcoming ? fade.next_line_scroll_factor : 0.0;
+
+        std::optional<std::pair<int, int>> spotlight;
+        if(is_active && m_map_hover.has_value() && (m_map_hover->line_index == i)
+           && preferences::display::map_hover_spotlight())
+        {
+            spotlight = std::make_pair(m_map_hover->row, m_map_hover->unit_index);
+            style.spotlight_active = true;
+        }
+        else
+        {
+            style.spotlight_active = false;
+        }
+
+        LaidOutBlock block;
+        block.line_index = int(i);
+        block.active = is_active;
+        block.top = total_height;
+        block.layout = layout_block(map,
+                                    line,
+                                    int(i),
+                                    style,
+                                    client_area,
+                                    CPoint(client_area.left, 0),
+                                    row_height,
+                                    measure,
+                                    colour_of,
+                                    spotlight);
+
+        if(is_active)
+        {
+            active_block_top = block.top;
+        }
+
+        total_height += block.layout.height;
+        blocks.push_back(std::move(block));
+    }
+
+    // Reproduce the plain renderer's scrolling: the active block is centred, and the scroll
+    // moves continuously from one block to the next over `scroll_duration`, using the height
+    // of the blocks in between rather than a line count.
+    CPoint origin = get_text_origin(client_area, font_metrics);
+    origin.y -= active_block_top;
+    if(scroll.active_line_index >= 0)
+    {
+        const int next_block_height =
+            (size_t(scroll.active_line_index) + 1 < blocks.size())
+                ? blocks[size_t(scroll.active_line_index) + 1].layout.content_height
+                : 0;
+        origin.y -= int(double(next_block_height) * scroll.next_line_scroll_factor);
+    }
+
+    // `origin.y` is a baseline for the plain renderer; block layout works in top-down
+    // coordinates, so shift up by the ascent and let each run centre its text inside its row.
+    origin.y -= font_metrics.tmAscent;
+
+    m_map_block_rects.clear();
+    m_map_runs.clear();
+
+    const int clip_top = client_area.top;
+    const int clip_bottom = client_area.bottom;
+
+    for(const LaidOutBlock& block : blocks)
+    {
+        // `layout_block` was asked to lay the block out at y = 0, so its runs are relative to
+        // the block's own top; `block.top` places the block in the song, `origin.y` scrolls
+        // the whole song. Both have to be added, or every block would paint on top of the
+        // first one.
+        const int block_top = origin.y + block.top;
+        CRect block_rect(client_area.left,
+                         block_top,
+                         client_area.right,
+                         block_top + block.layout.content_height);
+
+        // Cheap culling: a block entirely outside the panel costs nothing to skip, which
+        // matters for a long song where most blocks are off-screen.
+        if((block_rect.bottom < clip_top) || (block_rect.top > clip_bottom)) continue;
+        if(block.layout.empty()) continue;
+
+        // The active block is marked with a tint and a rule on its left instead of being
+        // recoloured: repainting it in the highlight colour would erase the POS grammar at
+        // precisely the moment the eye is on it.
+        if(block.active)
+        {
+            const t_ui_color tint_base = defaultui::background_colour();
+            const COLORREF tint = lerp(tint_base, preferences::display::highlight_colour(), 0.18);
+            HBRUSH brush = CreateSolidBrush(tint);
+            FillRect(dc, &block_rect, brush);
+            DeleteObject(brush);
+
+            const CRect rule(block_rect.left,
+                             block_rect.top + 2,
+                             block_rect.left + std::max(2, row_height / 8),
+                             block_rect.top + block.layout.content_height - 2);
+            HBRUSH rule_brush = CreateSolidBrush(preferences::display::highlight_colour());
+            FillRect(dc, &rule, rule_brush);
+            DeleteObject(rule_brush);
+        }
+
+        for(const MapRun& run : block.layout.runs)
+        {
+            CRect run_rect(run.rect);
+            run_rect.OffsetRect(0, block_top);
+            if((run_rect.bottom < clip_top) || (run_rect.top > clip_bottom)) continue;
+            if(run_rect.Width() <= 0) continue;
+
+            SetTextColor(dc, run.colour);
+
+            // Text is vertically centred in its row, the same way the plain renderer centres
+            // a line, so that toggling the map does not shift the text within its space.
+            const int text_baseline = run_rect.top + (row_height - font_metrics.tmHeight) / 2 + font_metrics.tmAscent;
+            UINT align = TA_LEFT;
+            switch(style.alignment)
+            {
+                case MapAlignment::Left: align = TA_LEFT; break;
+                case MapAlignment::Centre: align = TA_CENTER; break;
+                case MapAlignment::Right: align = TA_RIGHT; break;
+                default: break;
+            }
+            SetTextAlign(dc, TA_BASELINE | align);
+
+            int draw_x = run_rect.left;
+            if(style.alignment == MapAlignment::Centre) draw_x = run_rect.CenterPoint().x;
+            if(style.alignment == MapAlignment::Right) draw_x = run_rect.right;
+
+            // An empty run is the placeholder for an instrumental line: it is laid out (so
+            // the block keeps its height) but there is nothing to draw.
+            if(!run.text.empty())
+            {
+                const BOOL ok = TextOut(dc, draw_x, text_baseline, run.text.data(), int(run.text.size()));
+                if(!ok)
+                {
+                    LOG_WARN("Failed to draw map run: %d", GetLastError());
+                }
+            }
+
+            // Remember the painted runs so that hover hit-testing uses exactly what is on
+            // screen, including for a wrapped continuation.
+            MapRun painted = run;
+            painted.rect = run_rect;
+            m_map_runs.push_back(std::move(painted));
+        }
+
+        MapBlockRect info;
+        info.rect = block_rect;
+        info.content = block_rect;
+        info.line_index = block.line_index;
+        m_map_block_rects.push_back(info);
+    }
+}
+
 void LyricPanel::OnPaint(CDCHandle)
 {
     // As suggested in this article: https://docs.microsoft.com/en-us/previous-versions/ms969905(v=msdn.10)
@@ -968,6 +1238,12 @@ void LyricPanel::OnPaint(CDCHandle)
     if(m_lyrics.IsEmpty())
     {
         DrawNoLyrics(m_back_buffer, client_rect);
+    }
+    else if(should_draw_map())
+    {
+        // A mapped, timed bundle draws its stacked columns and hides the plain path
+        // entirely: the two must not both paint, or the text would double up.
+        DrawMappedLyrics(m_back_buffer, client_rect, m_lyrics.IsTimestamped());
     }
     else if(m_lyrics.IsTimestamped() && (preferences::display::scroll_type() == LineScrollType::Automatic))
     {
@@ -1412,8 +1688,81 @@ LRESULT LyricPanel::OnMouseWheel(UINT /*virtualKeys*/, short rotation, CPoint /*
     return 0;
 }
 
+void LyricPanel::OnMouseLeave()
+{
+    clear_map_hover();
+}
+
+void LyricPanel::clear_map_hover()
+{
+    if(!m_map_hover.has_value()) return;
+    m_map_hover.reset();
+    Invalidate();
+}
+
+bool LyricPanel::update_map_hover(CPoint point)
+{
+    if(!should_draw_map() || !preferences::display::map_hover_spotlight())
+    {
+        if(m_map_hover.has_value())
+        {
+            m_map_hover.reset();
+            return true;
+        }
+        return false;
+    }
+
+    // NOTE: The runs are stored from the last paint, so they already include the scroll
+    //       offset that was current at that moment. Re-deriving the geometry here instead
+    //       would risk the highlight landing on a different word than the painted one.
+    std::optional<MapHover> hover;
+    for(const MapRun& run : m_map_runs)
+    {
+        if(run.text.empty()) continue;
+        if(!run.rect.PtInRect(point)) continue;
+
+        hover = MapHover { size_t(run.line_index), run.row, run.unit_index };
+        break;
+    }
+
+    const bool changed = (hover.has_value() != m_map_hover.has_value())
+                         || (hover.has_value() && m_map_hover.has_value()
+                             && ((hover->line_index != m_map_hover->line_index)
+                                 || (hover->row != m_map_hover->row)
+                                 || (hover->unit_index != m_map_hover->unit_index)));
+    m_map_hover = hover;
+    return changed;
+}
+
+bool LyricPanel::seek_to_map_block(CPoint point)
+{
+    if(!should_draw_map()) return false;
+    if(!m_lyrics.IsTimestamped()) return false;
+
+    for(const MapBlockRect& block : m_map_block_rects)
+    {
+        if(!block.rect.PtInRect(point)) continue;
+        if(size_t(block.line_index) >= m_lyrics.lines.size()) return false;
+
+        const double timestamp = m_lyrics.lines[size_t(block.line_index)].timestamp;
+        if(timestamp <= 0.0) return false;
+
+        service_ptr_t<playback_control> playback = playback_control::get();
+        if(playback.is_empty()) return false;
+
+        playback->playback_seek(timestamp + m_now_playing_time_offset);
+        return true;
+    }
+    return false;
+}
+
 void LyricPanel::OnMouseMove(UINT /*virtualKeys*/, CPoint point)
 {
+    if(update_map_hover(point))
+    {
+        Invalidate();
+    }
+
     if(m_manual_scroll_start.has_value())
     {
         const int scroll_delta = point.y - m_manual_scroll_start.value().y;
@@ -1431,6 +1780,14 @@ void LyricPanel::OnMouseMove(UINT /*virtualKeys*/, CPoint point)
 
 void LyricPanel::OnLMBDown(UINT /*virtualKeys*/, CPoint point)
 {
+    // Clicking a mapped block seeks to it, which is the behaviour people expect from a
+    // karaoke-style view, and the only way to reach a block that is off-screen without
+    // waiting for playback. A track without a map keeps drag-to-scroll, untouched.
+    if(seek_to_map_block(point))
+    {
+        return;
+    }
+
     m_manual_scroll_start = point;
     SetCapture();
 }

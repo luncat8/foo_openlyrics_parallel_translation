@@ -15,6 +15,7 @@
 #define IDD_PREFERENCES_SRC_LOCALFILES  154
 #define IDD_PREFERENCES_SEARCHING       156
 #define IDD_PREFERENCES_UPLOADING       157
+#define IDD_PREFERENCES_DISPLAY_MAP     158
 #define IDC_ACTIVE_SOURCE_LIST          1021
 #define IDC_INACTIVE_SOURCE_LIST        1025
 #define IDC_SOURCE_ACTIVATE_BTN         1026
@@ -103,14 +104,23 @@
 #define IDC_UPLOAD_STRATEGY             1127
 #define IDC_SEARCH_WITHOUT_PANELS       1128
 #define IDC_SEARCHING_EXCLUDE_HELP      1129
+#define IDC_MAP_ENABLED                 1130
+#define IDC_MAP_SHOW_TRANSLIT           1131
+#define IDC_MAP_PALETTE_FROM_BUNDLE     1132
+#define IDC_MAP_HOVER_SPOTLIGHT         1133
+#define IDC_MAP_PAST_BLEND              1134
+#define IDC_MAP_PAST_BLEND_PREVIEW      1135
+#define IDC_MAP_INDENT                  1136
+#define IDC_MAP_INDENT_PREVIEW          1137
+#define IDC_MAP_HIDDEN_COLUMNS          1138
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        129
+#define _APS_NEXT_RESOURCE_VALUE        159
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1130
+#define _APS_NEXT_CONTROL_VALUE         1139
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

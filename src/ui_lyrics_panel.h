@@ -4,6 +4,7 @@
 
 #include "img_processing.h"
 #include "lyric_io.h"
+#include "lyric_map_plugin.h"
 #include "metadb_index_search_avoidance.h"
 
 class LyricPanel : public CWindowImpl<LyricPanel>, protected ui_config_callback_impl, private play_callback
@@ -65,7 +66,7 @@ protected:
     virtual LRESULT OnNonClientCalcSize(BOOL calc_valid_rects, LPARAM lparam);
     virtual void OnNonClientMouseMove(UINT /*virtual_keys*/, CPoint /*point*/) {}
     virtual void OnNonClientMouseLeave() {}
-    virtual void OnMouseLeave() {}
+    virtual void OnMouseLeave();
     virtual void OnMouseMove(UINT virtualKeys, CPoint point);
     virtual void OnLMBDown(UINT virtualKeys, CPoint point);
     virtual void OnLMBUp(UINT virtualKeys, CPoint point);
@@ -89,6 +90,26 @@ private:
     void DrawNoLyrics(HDC dc, CRect client_area);
     void DrawUntimedLyrics(HDC dc, CRect client_area);
     void DrawTimestampedLyrics(HDC dc, CRect client_area);
+
+    // Word-map rendering. `DrawMappedLyrics` is the entry point used instead of the plain
+    // path when the current lyrics carry a map and the user has not switched maps off; the
+    // plain path stays untouched so that a track without a bundle is byte-for-byte the same
+    // as before.
+    void DrawMappedLyrics(HDC dc, CRect client_area, bool is_timestamped);
+
+    // True when the current lyrics should be drawn as a word map.
+    bool should_draw_map() const;
+
+    // Updates the word-map spotlight to follow the pointer. Returns true when the hover
+    // state changed, so the caller knows whether a repaint is needed: a panel that
+    // repaints on every mouse move burns a timer tick each time.
+    bool update_map_hover(CPoint point);
+
+    // Seeks to the block that was clicked. Returns true when the click was consumed, so
+    // that the drag-to-scroll behaviour does not also fire.
+    bool seek_to_map_block(CPoint point);
+
+    void clear_map_hover();
 
 protected: // TODO: Only protected to support the external window
     struct PlaybackTimeInfo
@@ -118,6 +139,30 @@ private:
 
     std::optional<CPoint> m_manual_scroll_start;
     int m_manual_scroll_distance;
+
+    // Hover state for the word-map spotlight: the unit under the pointer, as (row, unit
+    // index) within the block, plus the block it belongs to. Cleared when the pointer
+    // leaves, when the panel scrolls and when a drag starts.
+    struct MapHover
+    {
+        size_t line_index = 0;
+        int row = 0;
+        int unit_index = 0;
+    };
+    std::optional<MapHover> m_map_hover;
+
+    // Where each block was drawn, so a click can seek and a hover can hit-test. Rebuilt on
+    // every paint; a paint is the only thing that changes the geometry.
+    struct MapBlockRect
+    {
+        CRect rect;        // the whole block, including continuation rows
+        CRect content;     // without the inter-block gap (what the highlight tint covers)
+        int line_index = 0;
+    };
+    std::vector<MapBlockRect> m_map_block_rects;
+
+    // The unit rectangles of the last paint, for the hover and click hit tests.
+    std::vector<MapRun> m_map_runs;
 
     now_playing_album_art_notify* m_albumart_listen_handle = nullptr;
     Image m_albumart_original = {};

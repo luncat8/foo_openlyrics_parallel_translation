@@ -154,6 +154,15 @@ namespace preferences
         double highlight_fade_seconds();
         int linegap();
 
+        // Word-map (LinguaMap bundle) rendering. See src/config/ui_preferences_display_map.cpp.
+        bool map_enabled();
+        bool map_show_transliteration();
+        bool map_palette_from_bundle(); // Use @pos/@posDark from the bundle, not the built-in table
+        bool map_hover_spotlight();
+        int map_past_blend_percent(); // 0-100: how far past blocks fade toward the past colour
+        int map_indent_px(); // 0 => derive from the font height
+        std::tstring map_hidden_columns(); // Comma-separated language keys never to draw
+
         bool debug_logs_enabled();
 
         namespace raw

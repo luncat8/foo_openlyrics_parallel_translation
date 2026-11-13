@@ -6,6 +6,8 @@
 #include "preferences.h"
 #include "win32_util.h"
 
+struct LyricMap; // The in-memory form of a LinguaMap bundle; see src/lyric_map.h
+
 struct LyricDataCommon
 {
     GUID source_id; // The source from which the lyrics were retrieved
@@ -45,6 +47,13 @@ struct LyricData : public LyricDataCommon
     std::vector<LyricDataLine> lines;
     double timestamp_offset;
 
+    // The word map this lyric text came from, when it came from a LinguaMap bundle.
+    // Shared rather than copied because `LyricData` is copied on every lyric update and a
+    // map holds thousands of small strings. Every existing code path works off `lines`,
+    // which the parser fills from the bundle's sources, so a null map simply means "render
+    // plain lyrics" and nothing else in the plugin changes.
+    std::shared_ptr<const LyricMap> map;
+
     LyricData() = default;
     LyricData(const LyricData& other) = default;
     LyricData(LyricData&& other) = default;
@@ -53,6 +62,10 @@ struct LyricData : public LyricDataCommon
 
     bool IsTimestamped() const;
     bool IsEmpty() const;
+
+    // True when there is a usable word map to render. Kept separate from `map != nullptr`
+    // so that a half-built map can never be drawn as if it were complete.
+    bool HasMap() const;
     double LineTimestamp(int line_index) const;
     double LineTimestamp(size_t line_index) const;
 

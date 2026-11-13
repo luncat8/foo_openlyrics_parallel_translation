@@ -1,0 +1,8 @@
+#!linguamap 1
+@source ja
+@columns ja,en
+@pos n=#12345
+@timeFormat none
+
+灯りが 揺れる
+	the lanterns sway

@@ -1,0 +1,15 @@
+﻿#!linguamap 1
+# a comment before any header
+@source ja
+@columns ja,en,ru
+@timeFormat none
+
+# a comment before the first block
+灯りが 揺れる
+	 en
+
+	the lanterns sway
+	
+静かな 港へ 帰る
+	the quiet harbour
+	тихая гавань

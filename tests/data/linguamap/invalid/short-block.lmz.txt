@@ -1,0 +1,8 @@
+#!linguamap 1
+@source ja
+@translit tr
+@columns ja,tr,en
+@timeFormat none
+
+灯りが 揺れる
+	akari ga yureru

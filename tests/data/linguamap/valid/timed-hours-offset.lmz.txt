@@ -1,0 +1,17 @@
+#!linguamap 1
+@source jp
+@translit tr
+@columns en,jp,tr
+@columnTitles en=English,jp=日本語,tr=Romaji
+@timeFormat lrc
+@offset 1.5
+
+[1:02:03.45]
+{未来:n}を {つかむ:v}
+	the future, seized
+	mirai o tsukamu
+
+[1:02:09.00]
+{♪:interj}
+	♪
+	♪

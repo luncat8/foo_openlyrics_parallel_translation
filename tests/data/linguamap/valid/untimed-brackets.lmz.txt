@@ -1,0 +1,10 @@
+#!linguamap 1
+@source en
+@columns en,ru
+@timeFormat none
+
+[intro] {not a marker
+	[интро] {не маркер
+
+Verse two, verbatim
+	Куплет два, дословно

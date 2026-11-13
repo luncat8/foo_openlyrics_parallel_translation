@@ -18,6 +18,7 @@
 #include "preferences.h"
 #include "tag_util.h"
 #include "ui_hooks.h"
+#include "ui_lyrics_map.h"
 #include "ui_lyrics_panel.h"
 
 #include "timer_block.h"
@@ -85,6 +86,11 @@ private:
     void DrawNoLyrics(D2DTextRenderContext& render);
     void DrawUntimedLyrics(LyricData& lyrics, D2DTextRenderContext& render);
     void DrawTimestampedLyrics(D2DTextRenderContext& render);
+
+    // Word-map equivalent of `DrawTimestampedLyrics`. Shares `layout_block` with the GDI
+    // panel so that both windows agree on wrapping, indents and block-to-block scrolling;
+    // only the draw call itself differs.
+    void DrawMappedLyrics(D2DTextRenderContext& render);
 
     HMODULE m_direct_composition = nullptr;
 
@@ -725,6 +731,242 @@ void ExternalLyricWindow::DrawTimestampedLyrics(D2DTextRenderContext& render)
     }
 }
 
+// Shares the layout decisions with the GDI panel (`layout_block`) and differs only in the
+// draw call: instead of `TextOut` per run this creates one `IDWriteTextLayout` per run and
+// draws it at the run's rectangle. That is the same number of layout objects the plain D2D
+// path creates per line, so a five-language block costs a handful more allocations and no
+// extra passes over the text.
+void ExternalLyricWindow::DrawMappedLyrics(D2DTextRenderContext& render)
+{
+    const LyricMap& map = *m_lyrics.map;
+    const D2D1_SIZE_F canvas_size = render.device->GetSize();
+
+    const int row_height = render.font_ascent_px + render.font_descent_px + preferences::display::linegap();
+    int indent_px = preferences::display::map_indent_px();
+    if(indent_px <= 0)
+    {
+        indent_px = std::max(1, render.font_ascent_px + render.font_descent_px);
+    }
+
+    MapBlockStyle style = {};
+    style.dark_mode = is_dark_mode();
+    style.indent_px = indent_px;
+    style.main_text_colour = preferences::display::main_text_colour();
+    style.past_text_colour = preferences::display::past_text_colour();
+    style.highlight_colour = preferences::display::highlight_colour();
+
+    switch(preferences::display::text_alignment())
+    {
+        case TextAlignment::MidCentre:
+        case TextAlignment::TopCentre: style.alignment = MapAlignment::Centre; break;
+
+        case TextAlignment::MidLeft:
+        case TextAlignment::TopLeft: style.alignment = MapAlignment::Left; break;
+
+        case TextAlignment::MidRight:
+        case TextAlignment::TopRight: style.alignment = MapAlignment::Right; break;
+
+        default: LOG_WARN("Unrecognised text alignment option when drawing a map"); break;
+    }
+
+    const PlaybackTimeInfo playback_time = get_playback_time();
+    const double scroll_time = preferences::display::scroll_time_seconds();
+    const LyricScrollPosition scroll = get_scroll_position(m_lyrics, playback_time.current_time, scroll_time);
+
+    const double fade_duration = preferences::display::highlight_fade_seconds();
+    const LyricScrollPosition fade = get_scroll_position(m_lyrics, playback_time.current_time, fade_duration);
+
+    // Measure through DirectWrite so that wrapping matches the font that will paint. A
+    // single reusable layout keeps this to one allocation for the whole block, which
+    // matters because layout runs on every timer tick.
+    Microsoft::WRL::ComPtr<IDWriteFactory> dwrite_factory = nullptr;
+    if(!HR_SUCCESS(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+                                       __uuidof(IDWriteFactory),
+                                       reinterpret_cast<IUnknown**>(dwrite_factory.GetAddressOf()))))
+    {
+        LOG_ERROR("Failed to create DirectWrite factory when drawing a map");
+        return;
+    }
+
+    // NOTE: `render.text_format` already carries the user's alignment, and a layout created
+    //       from it would therefore be laid out relative to its own width rather than as a
+    //       free-standing run. Both measuring and drawing therefore need a layout that
+    //       neither wraps nor aligns: the wrapping decision belongs to `layout_block`, which
+    //       needs the *natural* width of the text to make it.
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> measure_layout = nullptr;
+    const MapMeasureFunction measure = [&](const std::tstring& text) -> int
+    {
+        if(text.empty()) return 0;
+
+        measure_layout.Reset();
+        if(!HR_SUCCESS(dwrite_factory->CreateTextLayout(text.data(),
+                                                        uint32_t(text.size()),
+                                                        render.text_format,
+                                                        // A generous width so that no
+                                                        // wrapping is implied by the box.
+                                                        std::max(canvas_size.width, 100000.0f),
+                                                        canvas_size.height,
+                                                        measure_layout.GetAddressOf())))
+        {
+            LOG_WARN("Failed to measure map text");
+            return int(text.size()) * 8;
+        }
+
+        if(!HR_SUCCESS(measure_layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)))
+        {
+            LOG_WARN("Failed to disable word wrapping when measuring map text");
+        }
+
+        DWRITE_TEXT_METRICS metrics = {};
+        if(!HR_SUCCESS(measure_layout->GetMetrics(&metrics)))
+        {
+            return int(text.size()) * 8;
+        }
+        return int(metrics.widthIncludingTrailingWhitespace);
+    };
+
+    const MapColourFunction colour_of = [&map, &style](colorization::Pos pos) -> COLORREF
+    {
+        return map.colour_of(pos, style.dark_mode, style.main_text_colour);
+    };
+
+    struct LaidOutBlock
+    {
+        MapBlockLayout layout;
+        int top = 0;
+        int line_index = 0;
+        bool active = false;
+    };
+
+    const CRect clip(0, 0, int(canvas_size.width), int(canvas_size.height));
+    std::vector<LaidOutBlock> blocks;
+    blocks.reserve(map.lines.size());
+
+    int total_height = 0;
+    int active_block_top = 0;
+
+    for(size_t i = 0; i < map.lines.size(); i++)
+    {
+        const bool is_active = (int(i) == scroll.active_line_index);
+        const bool is_upcoming = (int(i) == scroll.active_line_index + 1);
+
+        style.past_factor = ((int(i) < scroll.active_line_index)) ? 1.0 : 0.0;
+        if(is_active) style.past_factor = fade.next_line_scroll_factor;
+        style.upcoming_factor = is_upcoming ? fade.next_line_scroll_factor : 0.0;
+
+        std::optional<std::pair<int, int>> spotlight;
+        if(is_active && m_map_hover.has_value() && (m_map_hover->line_index == i)
+           && preferences::display::map_hover_spotlight())
+        {
+            spotlight = std::make_pair(m_map_hover->row, m_map_hover->unit_index);
+            style.spotlight_active = true;
+        }
+        else
+        {
+            style.spotlight_active = false;
+        }
+
+        LaidOutBlock block;
+        block.line_index = int(i);
+        block.active = is_active;
+        block.top = total_height;
+        block.layout = layout_block(map,
+                                    map.lines[i],
+                                    int(i),
+                                    style,
+                                    clip,
+                                    CPoint(0, 0),
+                                    row_height,
+                                    measure,
+                                    colour_of,
+                                    spotlight);
+
+        if(is_active) active_block_top = block.top;
+        total_height += block.layout.height;
+        blocks.push_back(std::move(block));
+    }
+
+    // Same vertical placement as `DrawTimestampedLyrics`, expressed in block heights instead
+    // of line heights so that a multi-row block scrolls past as one unit.
+    int origin_y = get_text_origin_y(canvas_size, render.font_ascent_px, render.font_descent_px);
+    origin_y -= active_block_top;
+    origin_y -= render.font_ascent_px;
+    if(scroll.active_line_index >= 0)
+    {
+        const int next_block_height =
+            (size_t(scroll.active_line_index) + 1 < blocks.size())
+                ? blocks[size_t(scroll.active_line_index) + 1].layout.content_height
+                : 0;
+        origin_y -= int(double(next_block_height) * scroll.next_line_scroll_factor);
+    }
+
+    for(const LaidOutBlock& block : blocks)
+    {
+        const int block_top = origin_y + block.top;
+        if((block_top + block.layout.content_height < 0) || (block_top > int(canvas_size.height))) continue;
+        if(block.layout.empty()) continue;
+
+        if(block.active)
+        {
+            const D2D1_COLOR_F tint = colour_gdi2dx(lerp(defaultui::background_colour(),
+                                                         preferences::display::highlight_colour(),
+                                                         0.18));
+            const D2D1_RECT_F tint_rect = D2D1::RectF(0.0f,
+                                                      float(block_top),
+                                                      canvas_size.width,
+                                                      float(block_top + block.layout.content_height));
+            render.brush->SetColor(tint);
+            render.device->FillRectangle(tint_rect, render.brush);
+
+            const float rule_width = float(std::max(2, row_height / 8));
+            const D2D1_RECT_F rule_rect = D2D1::RectF(0.0f,
+                                                      float(block_top + 2),
+                                                      rule_width,
+                                                      float(block_top + block.layout.content_height - 2));
+            render.brush->SetColor(colour_gdi2dx(preferences::display::highlight_colour()));
+            render.device->FillRectangle(rule_rect, render.brush);
+        }
+
+        for(const MapRun& run : block.layout.runs)
+        {
+            if(run.text.empty()) continue;
+
+            // As in the GDI path: the runs were laid out at y = 0, so the block's own top
+            // has to be added as well as the scroll offset.
+            const int run_top = block_top + run.rect.top;
+            const int run_bottom = block_top + run.rect.bottom;
+            if((run_bottom < 0) || (run_top > int(canvas_size.height))) continue;
+
+            Microsoft::WRL::ComPtr<IDWriteTextLayout> layout = nullptr;
+            if(!HR_SUCCESS(dwrite_factory->CreateTextLayout(run.text.data(),
+                                                            uint32_t(run.text.size()),
+                                                            render.text_format,
+                                                            std::max(1.0f, float(run.rect.Width())),
+                                                            float(row_height),
+                                                            layout.GetAddressOf())))
+            {
+                LOG_WARN("Failed to create a text layout for a map run");
+                continue;
+            }
+
+            // The run has already been wrapped by `layout_block` and measured to fit the row
+            // it was placed on, so it must be drawn on one line starting exactly at the
+            // rectangle the layout chose: no further wrapping and no re-alignment, or the
+            // runs would drift apart instead of forming a line of text.
+            if(!HR_SUCCESS(layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP))
+               || !HR_SUCCESS(layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)))
+            {
+                LOG_WARN("Failed to configure a text layout for a map run");
+                continue;
+            }
+
+            render.brush->SetColor(colour_gdi2dx(run.colour));
+            const D2D1_POINT_2F draw_origin = D2D1::Point2F(float(run.rect.left), float(run_top));
+            render.device->DrawTextLayout(draw_origin, layout.Get(), render.brush, D2D1_DRAW_TEXT_OPTIONS_NO_SNAP);
+        }
+    }
+}
+
 void ExternalLyricWindow::OnWindowDestroy()
 {
     LyricPanel::OnWindowDestroy();
@@ -883,6 +1125,7 @@ void ExternalLyricWindow::OnMouseMove(UINT virtual_keys, CPoint mouse_pos)
 void ExternalLyricWindow::OnMouseLeave()
 {
     m_mouse_hover = false;
+    clear_map_hover(); // the word-map spotlight lives in the shared panel state
     Invalidate();
 }
 
@@ -1166,6 +1409,10 @@ void ExternalLyricWindow::OnPaint(CDCHandle)
         if(m_lyrics.IsEmpty())
         {
             DrawNoLyrics(render);
+        }
+        else if(should_draw_map())
+        {
+            DrawMappedLyrics(render);
         }
         else if(m_lyrics.IsTimestamped() && (preferences::display::scroll_type() == LineScrollType::Automatic))
         {

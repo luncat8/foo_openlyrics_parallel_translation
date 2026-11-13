@@ -1,0 +1,4 @@
+#!linguamap 1
+@source ja
+@columns ja,en
+@timeFormat none

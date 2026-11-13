@@ -22,6 +22,11 @@ bool LyricData::IsEmpty() const
     return lines.empty();
 }
 
+bool LyricData::HasMap() const
+{
+    return (map != nullptr) && map->is_valid();
+}
+
 double LyricData::LineTimestamp(int line_index) const
 {
     if(line_index < 0) return 0.0;

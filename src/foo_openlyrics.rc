@@ -212,6 +212,32 @@ BEGIN
     PUSHBUTTON      "?",IDC_SEARCHING_EXCLUDE_HELP,306,2,14,14
 END
 
+IDD_PREFERENCES_DISPLAY_MAP DIALOGEX 0, 0, 332, 288
+STYLE DS_SETFONT | WS_CHILD
+FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
+BEGIN
+    CONTROL         "Show word maps when a .lmz.txt bundle is available",IDC_MAP_ENABLED,
+                    "Button",BS_AUTOCHECKBOX | BS_TOP | BS_MULTILINE | WS_TABSTOP,7,4,300,18
+    LTEXT           "Tracks without a bundle are unaffected: they always show plain lyrics.",IDC_STATIC,7,24,310,8
+    GROUPBOX        "Columns",IDC_STATIC,0,38,326,64
+    CONTROL         "Show the transliteration column (only when the bundle has one)",IDC_MAP_SHOW_TRANSLIT,
+                    "Button",BS_AUTOCHECKBOX | BS_TOP | BS_MULTILINE | WS_TABSTOP,10,51,240,18
+    LTEXT           "Never draw these languages (comma-separated keys, e.g. tr,de):",IDC_STATIC,10,73,196,8
+    EDITTEXT        IDC_MAP_HIDDEN_COLUMNS,208,71,114,14,ES_AUTOHSCROLL
+    GROUPBOX        "Appearance",IDC_STATIC,0,108,326,116
+    CONTROL         "Use the palette stored in the bundle",IDC_MAP_PALETTE_FROM_BUNDLE,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,10,121,240,10
+    CONTROL         "Spotlight a word and its translations on hover",IDC_MAP_HOVER_SPOTLIGHT,
+                    "Button",BS_AUTOCHECKBOX | WS_TABSTOP,10,135,240,10
+    LTEXT           "Fade past blocks toward the past text colour:",IDC_STATIC,10,153,180,8
+    CONTROL         "",IDC_MAP_PAST_BLEND,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,190,150,80,15
+    LTEXT           "Static",IDC_MAP_PAST_BLEND_PREVIEW,276,153,46,8
+    LTEXT           "Indent of translation lines:",IDC_STATIC,10,175,180,8
+    CONTROL         "",IDC_MAP_INDENT,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,190,172,80,15
+    LTEXT           "Static",IDC_MAP_INDENT_PREVIEW,276,175,46,8
+    LTEXT           "Word maps are read from '<file name format>.lmz.txt', so the lyrics directory and file name format on the Saving page govern them too. OpenLyrics never writes or modifies a bundle.",IDC_STATIC,10,232,312,50
+END
+
 IDD_PREFERENCES_UPLOADING DIALOGEX 0, 0, 332, 288
 STYLE DS_SETFONT | WS_CHILD
 FONT 8, "Microsoft Sans Serif", 400, 0, 0x0
@@ -365,6 +391,11 @@ BEGIN
 END
 
 IDD_PREFERENCES_UPLOADING AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PREFERENCES_DISPLAY_MAP AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

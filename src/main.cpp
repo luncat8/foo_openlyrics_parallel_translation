@@ -32,6 +32,18 @@ namespace
                "- Better support non-latin whitespace characters for word wrapping\n"
                "- Fix auto-search triggering for missing local files\n"
                "\n";
+        out += "Unreleased:\n"
+               "- Add parallel-translation word maps (LinguaMap .lmz.txt bundles)\n"
+               "  - A source line with its translations stacked underneath, coloured by\n"
+               "    part of speech, with a shared highlight following the current line\n"
+               "  - Reads '<lyrics file>.lmz.txt' from the lyrics directory for the\n"
+               "    current track, and bundles pasted into a lyrics tag or the editor\n"
+               "  - Purely additive: tracks without a bundle render exactly as before\n"
+               "  - Colours come from the bundle when it provides them, otherwise from\n"
+               "    the palette published alongside the LinguaMap format\n"
+               "  - 'make check' validates the reader against the documented examples\n"
+               "    and rejects malformed bundles with an exact line number\n"
+               "\n";
         out += "Version 1.13 (2026-01-17):\n"
                "- Enable searching local sources with no visible panels by default\n"
                "- Add some clarifying help to the 'Exclude trailing brackets' search option\n"

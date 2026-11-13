@@ -1,0 +1,11 @@
+#!linguamap 1
+@source ja
+@columns ja,en
+@timeFormat lrc
+
+[00:04.20]
+灯りが 揺れる
+	the lanterns sway
+
+静かな 港へ 帰る
+	coming home

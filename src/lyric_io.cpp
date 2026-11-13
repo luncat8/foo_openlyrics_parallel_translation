@@ -3,6 +3,7 @@
 #include "logging.h"
 #include "lyric_auto_edit.h"
 #include "lyric_data.h"
+#include "lyric_map_plugin.h"
 #include "lyric_io.h"
 #include "metadb_index_search_avoidance.h"
 #include "metrics.h"
@@ -216,6 +217,46 @@ static std::string decode_to_utf8(const std::vector<uint8_t> text_bytes)
     return "";
 }
 
+// Turns retrieved lyric bytes into `LyricData`. LinguaMap bundles go through the map
+// parser (which fills `lines` from the bundle's sources and attaches the map); everything
+// else keeps using the LRC parser unchanged. Routing here rather than inside one source
+// means a bundle found by *any* source (a local file, or a future remote one) renders
+// correctly, and a source that returns bundle text gets no special-casing.
+static LyricData parse_lyric_text(const LyricDataRaw& raw, std::string_view text)
+{
+    if(!linguamap::looks_like_bundle(text))
+    {
+        return parsers::lrc::parse(raw, text);
+    }
+
+    LyricData lyrics;
+    std::string error;
+    size_t error_line = 0;
+    std::vector<std::string> warnings;
+    if(!lyric_map_plugin::to_lyric_data(raw, text, lyrics, error, error_line, warnings))
+    {
+        // A broken bundle must never leave the panel empty: log once with the reason and
+        // line, then fall back to reading it as plain lyrics (which usually still shows
+        // the source text, just without translations or colours).
+        LOG_WARN("Rejected LinguaMap bundle from %s at line %zu: %s. Falling back to plain lyrics",
+                 raw.source_path.c_str(),
+                 error_line,
+                 error.c_str());
+        return parsers::lrc::parse(raw, text);
+    }
+
+    for(const std::string& warning : warnings)
+    {
+        LOG_INFO("LinguaMap bundle %s: %s", raw.source_path.c_str(), warning.c_str());
+    }
+    LOG_INFO("Loaded LinguaMap bundle from %s: %zu blocks, %zu languages, %s",
+             raw.source_path.c_str(),
+             lyrics.map->lines.size(),
+             lyrics.map->column_languages.size(),
+             lyrics.map->is_timed() ? "timed" : "untimed");
+    return lyrics;
+}
+
 static std::string decode_raw_lyric_bytes_to_text(const LyricDataRaw& raw)
 {
     if(raw.text_bytes.empty())
@@ -414,7 +455,7 @@ static void internal_search_for_lyrics(LyricSearchHandle& handle, bool local_onl
     LOG_INFO("Parsing lyrics text...");
     handle.set_progress("Parsing...");
 
-    LyricData lyric_data = parsers::lrc::parse(lyric_data_raw, decode_raw_lyric_bytes_to_text(lyric_data_raw));
+    LyricData lyric_data = parse_lyric_text(lyric_data_raw, decode_raw_lyric_bytes_to_text(lyric_data_raw));
     if(lyric_data.IsEmpty())
     {
         if(!local_only)
@@ -494,7 +535,7 @@ static void internal_search_for_all_lyrics_from_source(LyricSearchHandle& handle
 
             if(lyric.has_value())
             {
-                LyricData parsed_lyrics = parsers::lrc::parse(result, lyric.value());
+                LyricData parsed_lyrics = parse_lyric_text(result, lyric.value());
                 handle.set_result(std::move(parsed_lyrics), false);
             }
         }
