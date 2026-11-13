@@ -1,4 +1,6 @@
-# foo_openlyrics
+# foo_openlyrics parallel translations
+
+Our goal to add fancy colored highlight similar to prototype: https://github.com/luncat8/translate-parallel-3-side
 
 ![build-and-test workflow](https://github.com/jacquesh/foo_openlyrics/actions/workflows/run_tests.yml/badge.svg)
 
